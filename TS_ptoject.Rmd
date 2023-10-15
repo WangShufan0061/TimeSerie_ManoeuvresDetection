@@ -1,0 +1,1947 @@
+---
+title: "Untitled"
+author: "Wang Shufan"
+date: "2023-08-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse,igraph,caret)#caret: condusion matrix， scaler,igraph
+```
+
+## Load data
+
+ALL the data just from CS2 (CRYO2) satellite, not all satellites!
+```{r cars}
+
+CS2_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_CryoSat-2.csv")
+CS2_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/cs2man.txt",col_names = FALSE)
+```
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+
+```
+
+```{r}
+colnames(CS2_manoeuvres)<-colname
+head(CS2_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+CS2_manoeuvres<-
+CS2_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+```
+
+```{r}
+head(CS2_manoeuvres[,c(1,14)])
+```
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+colnames(CS2_propogated)<-colname_orbit
+colnames(CS2_unpropogated)<-colname_orbit
+head(CS2_propogated)
+head(CS2_unpropogated)
+```
+```{r}
+CS2_unpropogated_ts<-ts(CS2_unpropogated)
+
+```
+
+```{r}
+# 改时间格式
+dts = temp[,1]
+mydates = dts
+class(mydates) = c('POSIXt','POSIXct')
+temp[,1]=with_tz(mydates, "UTC")
+```
+
+## Plot
+
+
+
+```{r pressure, echo=FALSE}
+#plot eccentricity vs time
+ggplot()+
+  geom_line(aes(x=time,y=eccentricity),data=CS2_unpropogated[50:800,])+
+  geom_vline(xintercept=CS2_manoeuvres$time_begin,color="red")+
+#geom_line(aes(x=time,y=eccentricity),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+
+
+
+
+
+```{r}
+#plot argument_of_perigee vs time
+ggplot()+
+  geom_line(aes(x=time,y=argument_of_perigee),data=ja3_unpropogated[50:800,])+
+    geom_vline(xintercept=ja3_manoeuvres$time_begin,color="red")+
+   #geom_line(aes(x=time,y=argument_of_perigee),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#,limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+
+
+```{r}
+#plot inclination vs time
+ggplot()+
+  geom_line(aes(x=time,y=inclination),data=ja3_unpropogated[50:800,])+
+    geom_vline(xintercept=ja3_manoeuvres$time_begin,color="red")+
+   #geom_line(aes(x=time,y=inclination),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#,limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+
+```{r}
+#plot mean_anomaly vs time
+ggplot()+
+  geom_line(aes(x=time,y=mean_anomaly),data=ja3_unpropogated[50:800,])+
+    geom_vline(xintercept=ja3_manoeuvres$time_begin,color="red")+
+   #geom_line(aes(x=time,y=mean_anomaly),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#,limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+
+
+```{r}
+#plot brouwer_mean_motion vs time
+ggplot()+
+  geom_line(aes(x=time,y=brouwer_mean_motion),data=ja3_unpropogated[50:800,])+
+   # geom_vline(xintercept=CS2_manoeuvres$time_begin,color="red")+
+  #geom_vline(xintercept=CS2_manoeuvres$time_end,color="blue")+
+  geom_vline(xintercept=ja3_manoeuvres$time_begin,color="red")+
+   #geom_line(aes(x=time,y=brouwer_mean_motion),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#,limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+
+```{r}
+#plot right_accension vs time
+ggplot()+
+  geom_line(aes(x=time,y=right_ascension),data=ja2_unpropogated[50:800,])+
+    geom_vline(xintercept=ja2_manoeuvres$time_med,color="red")+
+   #geom_line(aes(x=time,y=right_ascension),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#,limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  CS2_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+  # geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+## SMLA
+
+# Satge 1
+```{r}
+# calculated the correlation matrix
+cor_matrix <- matrix(1:36, nrow = 6, dimnames = list(c("ecc","aop","inc","ma","bmm","ra"), c("ecc","aop","inc","ma","bmm","ra")))
+
+for (i in 1:6){
+  for (j in 1:6){
+    cor_matrix[i,j]<-cor(CS2_unpropogated_ts[,i+1],CS2_unpropogated_ts[,j+1] , method ="spearman")
+  }
+}
+cor_matrix
+  
+```
+
+
+```{r}
+#Adjencecy matrix
+diag(cor_matrix)<-NA
+cor_v= sort(c(cor_matrix),na.last=NA)
+#threshold = quantile(abs(cor_v),0.25)
+threshold = 0.5
+result = which(abs(cor_matrix) < threshold, arr.ind=TRUE)
+A<-cor_matrix
+A[result]=0
+A
+
+```
+```{r}
+nodes <- data.frame(d = 1:6,
+                    name = c("eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension"))
+edges <- data.frame(from = c(1,1,1,1,1,2,2,2,3,4,5),
+                    to = c(2,3,4,5,6,4,5,6,5,6,6))
+g1_visual <- graph_from_data_frame(edges, directed = FALSE, vertices = nodes) %>% 
+  set_vertex_attr("name", 
+                  index = V(.), 
+                  paste0(order(as.numeric(edges$from)), "\n", nodes$name)) 
+#Code to visualize the graph
+library(visNetwork)
+
+m_1 <- 1
+m_2 <- 23.6
+
+a <- toVisNetworkData(g1) %>%
+  c(., list(main = paste0("Trip ", m_1, " : "), submain = paste0 (m_2, "KM") )) %>%
+  do.call(visNetwork, .) 
+a
+```
+
+```{r}
+#graph
+g1<-graph_from_adjacency_matrix( abs(A), weighted=T, mode="undirected", diag=F)
+
+```
+
+```{r}
+cluster_s1=cluster_louvain(g1)
+cluster_s1
+```
+```{r}
+cluster_s1<-SMLA_s1(CS2_unpropogated_ts,0.5)
+cluster_s1
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+```
+
+```{r}
+# split in the different group
+group1<- CS2_unpropogated_ts[,c(1,index1+1)]
+group2<- CS2_unpropogated_ts[,c(1,index2+1)]
+ 
+```
+
+```{r}
+
+
+
+```
+
+# stage 2
+
+```{r}
+#没用
+pacman::p_load(slider)
+window_length=99
+temp<-slide(group1, ~.x, .before = window_length-1, .complete = TRUE)
+```
+
+```{r}
+
+window_length=10
+n_windows=floor(nrow(CS2_unpropogated)/window_length)+1
+windows_norepeat<-list()
+for (i in 0:(n_windows-2)){
+  windows_norepeat[i+1]<- list(window(ts(group1),start = window_length*i+1, end = window_length*(i+1)))
+}
+windows_norepeat[n_windows] <- list(window(ts(group1),start = window_length*(n_windows-1)+1, end = nrow(CS2_unpropogated)))
+```
+
+
+```{r}
+
+cor_matrix_w <- matrix(1:9, nrow = 3, dimnames = list(c("ecc","aop","ma"), c("ecc","aop","ma")))
+cluster_w <-matrix(0, nrow = n_windows,ncol=3)
+for (i in 1:n_windows){
+  for (j in 2:4){#因为第一列是time
+    for (k in 2:4){#同上
+      cor_matrix_w[j-1,k-1]<-abs(cor(windows_norepeat[[i]][,j],windows_norepeat[[i]][,k], method ="spearman"))
+   }
+  }
+  # 选取threshold, 创建邻接矩阵
+  diag(cor_matrix_w)<-NA
+  cor_v= sort(c(cor_matrix_w),na.last=NA)
+  threshold = 0.5 #quantile(abs(cor_v),0.63)
+  result = which(abs(cor_matrix_w) < threshold, arr.ind=TRUE)
+A<-cor_matrix_w
+A[result]=0
+#graph
+graph<-graph_from_adjacency_matrix( A, weighted=T, mode="undirected", diag=F)
+if (is.nan(cluster_louvain(graph)$modularity)){
+  cluster_w[i,]=c(1,2,3)
+}
+else{
+cluster_w[i,]=c(cluster_louvain(graph)$memberships)
+}
+}
+```
+
+```{r}
+df<-as.data.frame(cluster_w)
+df
+```
+
+```{r}
+window_index=sort(as.data.frame(which(cluster_w[]!=c(1,1,1),arr.ind=TRUE))$row)
+anomaly_index = unique(window_index)
+anomaly_index_pre <- rep(0,nrow(interval))
+anomaly_index_pre[anomaly_index]=1
+```
+
+```{r}
+#好像也用不上
+anomaly_interval <- matrix(0, nrow = length(anomaly_index), ncol = 2)
+for (i in 1:length(anomaly_index)){
+  anomaly_interval[i,1]=windows_norepeat[[anomaly_index[i]]][1,1]
+  anomaly_interval[i,2]=windows_norepeat[[anomaly_index[i]]][nrow(windows_norepeat[[anomaly_index[i]]]),1]
+}
+
+```
+
+```{r}
+interval <- matrix(0, nrow = n_windows, ncol = 2)
+for (i in 1:n_windows){
+  interval[i,1]=windows_norepeat[[i]][1,1]
+  interval[i,2]=windows_norepeat[[i]][nrow(windows_norepeat[[i]]),1]
+}
+```
+
+
+```{r}
+median_date <- ts(CS2_manoeuvres)[,16]
+anomaly_index_obs <- rep(0,nrow(interval))
+for (i in 1: nrow(interval)){
+  current <- interval[i,]
+  if (sum(current[1]<median_date &median_date<current[2])){
+    anomaly_index_obs[i] <- 1
+  }
+  }
+```
+
+```{r}
+minor<-confusionMatrix(factor(anomaly_index_pre), factor(anomaly_index_obs), mode = "everything", positive="1")
+major<-confusionMatrix(factor(anomaly_index_pre), factor(anomaly_index_obs), mode = "everything", positive="0")
+minorF1<-minor$byClass[7]
+majorF1<-major$byClass[7]
+weighted_F1<-sum(anomaly_index_obs==0)/length(anomaly_index_obs)*majorF1+sum(anomaly_index_obs==1)/length(anomaly_index_obs)*minorF1
+weighted_F1
+```
+
+
+## 函数
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+
+cluster_s1<-SMLA_s1(CS2_unpropogated_ts,0.50,"pearson")
+cluster_s1
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- CS2_unpropogated_ts[,c(1,index1+1)]
+group2<- CS2_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 50:99){
+  a<-SMLA_s2(group1, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i-49]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+# threshold= 42+49=91%
+```
+
+
+
+```{r}
+
+plot(1:50,result1)
+```
+#HaiYang-2A
+```{r}
+h2a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Haiyang-2A.csv")
+h2a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/h2aman.txt",col_names = FALSE)
+```
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(h2a_manoeuvres)<-colname
+head(h2a_manoeuvres)
+```
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    #year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    #year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    #year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+h2a_manoeuvres<-
+h2a_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(h2a_manoeuvres)
+```
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(h2a_unpropogated)<-colname_orbit
+
+head(h2a_unpropogated)
+```
+
+```{r}
+h2a_unpropogated_ts<-ts(h2a_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(h2a_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(h2a_unpropogated_ts,0.70,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- h2a_unpropogated_ts[,c(1,index2+1)]
+group3<- h2a_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+#plot brouwer_mean_motion vs time
+ggplot()+
+  geom_line(aes(x=time,y=brouwer_mean_motion),data=h2a_unpropogated)+
+   # geom_vline(xintercept=CS2_manoeuvres$time_begin,color="red")+
+  #geom_vline(xintercept=CS2_manoeuvres$time_end,color="blue")+
+  geom_vline(xintercept=h2a_manoeuvres$time_med,color="yellow")+
+   #geom_line(aes(x=time,y=brouwer_mean_motion),data=CS2_propogated,color="red")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))#,limits = as.POSIXct(strptime(c("2010-01-01 00:00:00","2025-01-01 00:00:00"), format = "%Y-%m-%d %H:%M:%S"))    )
+```
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  h2a_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+  # geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+
+```{r}
+
+plot(1:100,result1)
+```
+#Jason1
+```{r}
+ja1_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Jason-1.csv")
+ja1_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/ja1man.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(ja1_manoeuvres)<-colname
+ja1_manoeuvres<-ja1_manoeuvres[,1:26]
+head(ja1_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    #year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    year == 2004 ~ as.Date(day-1,origin="2004-01-01"),
+    year == 2005 ~ as.Date(day-1,origin="2005-01-01"),
+    year == 2006 ~ as.Date(day-1,origin="2006-01-01"),
+    year == 2007 ~ as.Date(day-1,origin="2007-01-01"),
+    year == 2008 ~ as.Date(day-1,origin="2008-01-01"),
+    year == 2009 ~ as.Date(day-1,origin="2009-01-01"),
+    year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+ja1_manoeuvres<-
+ja1_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(ja1_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(ja1_unpropogated)<-colname_orbit
+
+head(ja1_unpropogated)
+```
+
+```{r}
+ja1_unpropogated_ts<-ts(ja1_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(ja1_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(ja1_unpropogated_ts,0.70,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- ja1_unpropogated_ts[,c(1,index2+1)]
+group3<- ja1_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 10:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i-9]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:90,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  ja1_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+  # geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+#Jason2
+```{r}
+ja2_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Jason-2.csv")
+ja2_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/ja2man.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(ja2_manoeuvres)<-colname
+ja2_manoeuvres<-ja2_manoeuvres[1:109,1:26]
+head(ja2_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    #year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2008 ~ as.Date(day-1,origin="2008-01-01"),
+    year == 2009 ~ as.Date(day-1,origin="2009-01-01"),
+    year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+ja2_manoeuvres<-
+ja2_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(ja2_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(ja2_unpropogated)<-colname_orbit
+
+head(ja2_unpropogated)
+```
+
+```{r}
+ja2_unpropogated_ts<-ts(ja2_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(ja2_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(ja2_unpropogated_ts,0.30,"pearson")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index4=which(cluster_s1$memberships==4)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group4<- ja2_unpropogated_ts[,c(1,index4+1)]
+group3<- ja2_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group4, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  ja2_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+  # geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+#Jason3
+```{r}
+ja3_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Jason-3.csv")
+ja3_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/ja3man.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(ja3_manoeuvres)<-colname
+ja3_manoeuvres<-ja3_manoeuvres[,1:26]
+head(ja3_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    #year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+    #year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    #year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    # year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    # year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    # year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+ja3_manoeuvres<-
+ja3_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(ja3_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(ja3_unpropogated)<-colname_orbit
+
+head(ja3_unpropogated)
+```
+
+```{r}
+ja3_unpropogated_ts<-ts(ja3_unpropogated)
+
+```
+
+
+```{r}
+median_date <- ts(ja3_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(ja3_unpropogated_ts,0.99,"pearson")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- ja3_unpropogated_ts[,c(1,index2+1)]
+group3<- ja3_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  ja3_unpropogated[1:10,]|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+  # geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+#SARAL
+```{r}
+srl_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_SARAL.csv")
+srl_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/srlman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(srl_manoeuvres)<-colname
+srl_manoeuvres<-srl_manoeuvres[,1:26]
+head(srl_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+    #year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    # year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    # year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    # year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+srl_manoeuvres<-
+srl_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(srl_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(srl_unpropogated)<-colname_orbit
+
+head(srl_unpropogated)
+```
+
+```{r}
+srl_unpropogated_ts<-ts(srl_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(srl_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(srl_unpropogated_ts,0.99,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- srl_unpropogated_ts[,c(1,index2+1)]
+group3<- srl_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  ja3_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+  # geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+
+#TOPEX
+```{r}
+top_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_TOPEX.csv")
+top_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/topman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_med","day_med","hour_med","min_med")
+colnames(top_manoeuvres)<-colname
+top_manoeuvres<-top_manoeuvres[,1:5]
+head(top_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute){
+  time=paste(hour,minute,sep=":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 1992 ~ as.Date(day-1,origin="1992-01-01"),
+    year == 1993 ~ as.Date(day-1,origin="1993-01-01"),
+    year == 1994 ~ as.Date(day-1,origin="1994-01-01"),
+    year == 1995 ~ as.Date(day-1,origin="1995-01-01"),
+    year == 1996 ~ as.Date(day-1,origin="1996-01-01"),
+    year == 1997 ~ as.Date(day-1,origin="1997-01-01"),
+    year == 1998 ~ as.Date(day-1,origin="1998-01-01"),
+    year == 1999 ~ as.Date(day-1,origin="1999-01-01"),
+    year == 2000 ~ as.Date(day-1,origin="2000-01-01"),
+    year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    year == 2004 ~ as.Date(day-1,origin="2004-01-01")
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time)
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+top_manoeuvres<-
+top_manoeuvres|>
+  mutate(
+    time_med=DATETIME(year_med,day_med,hour_med,min_med),
+    .keep="unused"
+  )
+
+head(top_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(top_unpropogated)<-colname_orbit
+
+head(top_unpropogated)
+```
+
+```{r}
+top_unpropogated_ts<-ts(top_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(top_manoeuvres)[,2]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(top_unpropogated_ts,0.7,"pearson")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- top_unpropogated_ts[,c(1,index2+1)]
+group3<- top_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[1]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  top_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+
+#s3a
+```{r}
+s3a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Sentinel-3A.csv")
+s3a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/s3aman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(s3a_manoeuvres)<-colname
+s3a_manoeuvres<-s3a_manoeuvres[,1:26]
+head(s3a_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+    #year == 1999 ~ as.Date(day-1,origin="1999-01-01"),
+    #year == 2000 ~ as.Date(day-1,origin="2000-01-01"),
+    #year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    #year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    #year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    #year == 2004 ~ as.Date(day-1,origin="2004-01-01")
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+s3a_manoeuvres<-
+s3a_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(s3a_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(s3a_unpropogated)<-colname_orbit
+
+head(s3a_unpropogated)
+```
+
+```{r}
+s3a_unpropogated_ts<-ts(s3a_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(s3a_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(s3a_unpropogated_ts,0.7,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- s3a_unpropogated_ts[,c(1,index2+1)]
+group3<- s3a_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group3, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  top_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+#s3b
+```{r}
+s3b_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Sentinel-3B.csv")
+s3b_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/s3bman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(s3b_manoeuvres)<-colname
+s3b_manoeuvres<-s3b_manoeuvres[,1:26]
+head(s3b_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    #year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    #year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+    #year == 1999 ~ as.Date(day-1,origin="1999-01-01"),
+    #year == 2000 ~ as.Date(day-1,origin="2000-01-01"),
+    #year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    #year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    #year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    #year == 2004 ~ as.Date(day-1,origin="2004-01-01")
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+s3b_manoeuvres<-
+s3b_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(s3b_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(s3b_unpropogated)<-colname_orbit
+
+head(s3b_unpropogated)
+```
+
+```{r}
+s3b_unpropogated_ts<-ts(s3b_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(s3b_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(s3b_unpropogated_ts,0.7,"pearson")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- s3b_unpropogated_ts[,c(1,index2+1)]
+group3<- s3b_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  top_unpropogated|>
+ggplot()+
+  #geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+
+#s6a
+```{r}
+s6a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Sentinel-6A.csv")
+s6a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/s6aman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(s6a_manoeuvres)<-colname
+s6a_manoeuvres<-s6a_manoeuvres[,1:26]
+head(s6a_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    #year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    #year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    #year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    #year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+    #year == 1999 ~ as.Date(day-1,origin="1999-01-01"),
+    #year == 2000 ~ as.Date(day-1,origin="2000-01-01"),
+    #year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    #year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    #year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    #year == 2004 ~ as.Date(day-1,origin="2004-01-01")
+   # year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#将manoeuvres中的有关时间的变量转化为Datetime格式，并删去使用过的变量 (transform the time variables in manoeuvres into Datetime format and delete the unsed variables)
+s6a_manoeuvres<-
+s6a_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(s6a_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(s6a_unpropogated)<-colname_orbit
+
+head(s6a_unpropogated)
+```
+
+```{r}
+s6a_unpropogated_ts<-ts(s6a_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(s6a_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(s6a_unpropogated_ts,0.5,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- s6a_unpropogated_ts[,c(1,index1+1)]
+group2<- s6a_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 5,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  top_unpropogated|>
+ggplot()+
+  geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  #geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ #geom_line(aes(x=time,y=inclination,color="inclination"))+
+  #geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  #geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+#FY2D
+```{r}
+fy2d_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2D.csv")
+fy2d_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2D.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2d_manoeuvres)<-colname
+fy2d_manoeuvres<-fy2d_manoeuvres
+head(fy2d_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2d_unpropogated)<-colname_orbit
+fy2d_unpropogated<-fy2d_unpropogated[5:nrow(fy2d_unpropogated),]
+head(fy2d_unpropogated)
+```
+
+```{r}
+fy2d_unpropogated_ts<-ts(fy2d_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2d_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2d_unpropogated_ts,0.2,"pearson")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- fy2d_unpropogated_ts[,c(1,index1+1)]
+group2<- fy2d_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[1]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  fy2d_unpropogated|>
+ggplot()+
+  geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+
+#FY2E
+```{r}
+fy2e_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2E.csv")
+fy2e_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2E.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2e_manoeuvres)<-colname
+fy2e_manoeuvres<-fy2e_manoeuvres
+head(fy2e_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2e_unpropogated)<-colname_orbit
+fy2e_unpropogated<-fy2e_unpropogated[5:nrow(fy2e_unpropogated),]
+head(fy2e_unpropogated)
+```
+
+```{r}
+fy2e_unpropogated_ts<-ts(fy2e_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2e_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2e_unpropogated_ts,0.5,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- fy2e_unpropogated_ts[,c(1,index1+1)]
+group2<- fy2e_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group1, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  fy2d_unpropogated|>
+ggplot()+
+  geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+#FY2E
+```{r}
+fy2e_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2E.csv")
+fy2e_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2E.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2e_manoeuvres)<-colname
+fy2e_manoeuvres<-fy2e_manoeuvres
+head(fy2e_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2e_unpropogated)<-colname_orbit
+fy2e_unpropogated<-fy2e_unpropogated[5:nrow(fy2e_unpropogated),]
+head(fy2e_unpropogated)
+```
+
+```{r}
+fy2e_unpropogated_ts<-ts(fy2e_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2e_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2e_unpropogated_ts,0.5,"spearman")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- fy2e_unpropogated_ts[,c(1,index1+1)]
+group2<- fy2e_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group1, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[3]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  fy2d_unpropogated|>
+ggplot()+
+  geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
+
+
+#FY2F
+```{r}
+fy2f_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2F.csv")
+fy2f_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2F.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2f_manoeuvres)<-colname
+fy2f_manoeuvres<-fy2f_manoeuvres
+head(fy2f_manoeuvres)
+```
+
+
+```{r}
+#更改列名(change columns names)
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2f_unpropogated)<-colname_orbit
+fy2f_unpropogated<-fy2f_unpropogated[5:nrow(fy2f_unpropogated),]
+head(fy2f_unpropogated)
+```
+
+```{r}
+fy2f_unpropogated_ts<-ts(fy2f_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2f_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2f_unpropogated_ts,0.4,"pearson")
+cluster_s1
+```
+
+```{r}
+source("SMLA_s1.R")
+source("SMLA_s2.R")
+source("aveF1_test.R")
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- fy2f_unpropogated_ts[,c(1,index1+1)]
+group2<- fy2f_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-aveF1_test(windows_norepeat,cluster_w,median_date)[[1]]
+}
+
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+colors <- c("eccentricity" = "blue", "brouwer mean motion" = "brown3", "argument of perigee" = "darkorange","inclination"="darkolivegreen","mean anomaly"="deepskyblue2","right ascension"="darkorchid2")
+  fy2d_unpropogated|>
+ggplot()+
+  geom_line(aes(x=time,y=eccentricity,color="eccentricity"))+
+   geom_line(aes(x=time,y=brouwer_mean_motion,color="brouwer mean motion"))+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+ geom_line(aes(x=time,y=inclination,color="inclination"))+
+  geom_line(aes(x=time,y=mean_anomaly,color="mean anomaly"))+
+  geom_line(aes(x=time,y=right_ascension, color="right ascension"))+
+  ggtitle("Mutiple time series for orbit parameters of CRYO2")+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+
+```
