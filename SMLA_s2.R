@@ -11,12 +11,12 @@ SMLA_s2<-function(group,threshold,window_length,method_cor){
   cor_matrix_w <- matrix(1:n_ts^2, nrow = n_ts)
   cluster_w <-matrix(0, nrow = n_windows,ncol=n_ts)
   for (i in 1:n_windows){
-    for (j in 2:(n_ts+1)){#因为第一列是time
-      for (k in 2:(n_ts+1)){#同上
+    for (j in 2:(n_ts+1)){#the first column is time stamp
+      for (k in 2:(n_ts+1)){
         cor_matrix_w[j-1,k-1]<-abs(cor(windows_norepeat[[i]][,j],windows_norepeat[[i]][,k], method =method_cor))
       }
     }
-    # 选取threshold, 创建邻接矩阵
+    # chose threshold, crear adjacent matrix
     diag(cor_matrix_w)<-NA
     cor_v= sort(c(cor_matrix_w),na.last=NA)
     result = which(abs(cor_matrix_w) < threshold, arr.ind=TRUE)
