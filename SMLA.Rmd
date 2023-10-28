@@ -112,7 +112,7 @@ for (i in 0:99){
   a<-SMLA_s2(group1, i/100, 10,"pearson")# method should be consistent with stage1
 cluster_w=a[[1]]
 windows_norepeat=a[[2]]
-result1[i-49]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 }
 
 ```
