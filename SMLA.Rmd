@@ -15,7 +15,7 @@ pacman::p_load(tidyverse,igraph,caret)#caret: condusion matrix， scaler,igraph
 ```{r}
 source("SMLA_s1.R")#function for stage 1
 source("SMLA_s2.R")#function for stage 2
-source("aveF1_test.R")# function for model evaluation
+source("model_eval.R")# function for model evaluation
 ```
 
 
