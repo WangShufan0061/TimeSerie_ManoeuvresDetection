@@ -107,6 +107,11 @@ group2<- CS2_unpropogated_ts[,c(1,index2+1)]
 ```
 
 ```{r}
+median_date <- ts(CS2_manoeuvres)[,16]
+median_date
+```
+
+```{r}
 result1<-list()
 for (i in 0:99){
   a<-SMLA_s2(group1, i/100, 10,"pearson")# method should be consistent with stage1
@@ -129,7 +134,6 @@ model_eval(windows_norepeat,cluster_w,median_date)
 ```
 
 ```{r}
-
 plot(1:100,result1)
 ```
 #HaiYang-2A
