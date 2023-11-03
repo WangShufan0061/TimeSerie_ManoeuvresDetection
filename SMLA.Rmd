@@ -1,0 +1,1751 @@
+---
+title: "SMLA"
+author: "Wang Shufan; Wang Xiaoyi Xu Yingxin"
+date: "03/11/2023"
+output: html_document
+---
+
+## load the package
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse,igraph,caret,scales)#caret: condusion matrix， scaler,igraph
+```
+
+
+## source the function
+```{r}
+source("SMLA_s1.R")#function for stage 1
+source("SMLA_s2.R")#function for stage 2
+source("SMLA_eval.R")# function for model evaluation
+```
+
+
+#CRYOSAT2
+Load the data
+```{r cars}
+
+CS2_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_CryoSat-2.csv")
+CS2_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/cs2man.txt",col_names = FALSE)
+```
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+
+```
+
+```{r}
+colnames(CS2_manoeuvres)<-colname
+head(CS2_manoeuvres)
+```
+
+```{r}
+#change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+#transform the time variables in manoeuvres into Datetime format and delete the unsed variables
+CS2_manoeuvres<-
+CS2_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+```
+
+
+
+```{r}
+#change columns names
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+colnames(CS2_unpropogated)<-colname_orbit
+
+head(CS2_unpropogated)
+```
+
+```{r}
+#delete the manoeuvres whose time is out of the orbit recording time range
+CS2_manoeuvres<-CS2_manoeuvres[2:165,]
+CS2_unpropogated_ts<-ts(CS2_unpropogated)
+
+```
+
+
+
+```{r}
+cluster_s1<-SMLA_s1(CS2_unpropogated_ts,0.5,"spearman")# the "spearman" can change to "pearson"
+cluster_s1
+```
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- CS2_unpropogated_ts[,c(1,index1+1)]
+group2<- CS2_unpropogated_ts[,c(1,index2+1)]
+```
+
+set maoneuvres time
+```{r}
+median_date <- ts(CS2_manoeuvres)[,16]
+median_date
+```
+loop to find the optimal threshold2
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group1,i/100, 10,"pearson")#group should be the group containing at least 2 time series and the method                                             should be consistent with the previous method in Stage 1
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+get the optimal model with current parameters
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group1, (index-1)/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+plot the relationship between F1 and threshold2
+```{r}
+
+plot(1:100,result1)
+```
+
+```{r}
+#ceck how the parameter change after manoeuvres occurrence
+colors <- c("argument of perigee" = "darkorange","negative mean anomaly"="deepskyblue2")
+  CS2_unpropogated[20:31,]|>
+ggplot()+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument of perigee" ))+
+  geom_line(aes(x=time,y=-mean_anomaly,color="negative mean anomaly"))+
+    geom_vline(xintercept=CS2_manoeuvres$time_end,color="red")+
+    scale_x_datetime(labels = date_format("%Y-%m-%d"))+
+  labs(x = "Time",
+         color = "Legend") +
+    scale_color_manual(values = colors)
+
+```
+
+anomaly inference
+```{r}
+window_index=sort(as.data.frame(which(cluster_w[]!=rep(1,ncol(cluster_w)),arr.ind=TRUE))$row)
+anomaly_index = unique(window_index)
+anomaly_index
+```
+
+```{r}
+#took the abnormal time windows manually
+w2 <- CS2_unpropogated[11:20,]
+w3 <- CS2_unpropogated[21:30,]
+w4 <- CS2_unpropogated[31:40,]
+w5 <- CS2_unpropogated[41:50,]
+w7 <- CS2_unpropogated[61:70,]
+w9 <- CS2_unpropogated[81:90,]
+w10 <- CS2_unpropogated[91:100,]
+w12 <- CS2_unpropogated[111:120,]
+w13 <- CS2_unpropogated[121:130,]
+w14 <- CS2_unpropogated[131:140,]
+w15 <- CS2_unpropogated[141:150,]
+w17 <- CS2_unpropogated[161:170,]
+w18 <- CS2_unpropogated[171:180,]
+w19 <- CS2_unpropogated[181:190,]
+w20 <- CS2_unpropogated[191:200,]
+w22 <- CS2_unpropogated[211:220,]
+w23 <- CS2_unpropogated[221:230,]
+
+temp<-data.frame(
+  start=c(w2[1,1]$time,w3[1,1]$time,w4[1,1]$time,w5[1,1]$time,w7[1,1]$time,w9[1,1]$time,w10[1,1]$time,w12[1,1]$time,w13[1,1]$time,w14[1,1]$time,w15[1,1]$time,w17[1,1]$time,w18[1,1]$time,w19[1,1]$time,w20[1,1]$time,w22[1,1]$time,w23[1,1]$time),
+  end =c(w2[10,1]$time,w3[10,1]$time,w4[10,1]$time,w5[10,1]$time,w7[10,1]$time,w9[10,1]$time,w10[10,1]$time,w12[10,1]$time,w13[10,1]$time,w14[10,1]$time,w15[10,1]$time,w17[10,1]$time,w18[10,1]$time,w19[10,1]$time,w20[10,1]$time,w22[10,1]$time,w23[10,1]$time)
+)
+dateRanges <- data.frame(
+  start = as.POSIXct(temp [,1], TZ = "UTC"),
+  end   = as.POSIXct(temp [,2], TZ = "UTC"))
+```
+
+
+```{r}
+
+colors <- c("argument_of_perigee" = "darkorange","mean_anomaly"="deepskyblue2","eccentricity"="purple")
+ggplot(CS2_unpropogated[1:230,]) + 
+  geom_rect(data = dateRanges, aes(xmin = start , xmax = end, ymin = -Inf, ymax = Inf),
+            inherit.aes=FALSE, alpha = 0.4, fill = c("lightblue"))+
+  geom_line(aes(x=time, y=mean_anomaly ,color="mean_anomaly"), size = 1,)+
+  geom_line(aes(x=time,y=argument_of_perigee,color="argument_of_perigee"),size=1)+
+  geom_line(aes(x=time,y=eccentricity,color="eccentricity"),size=1)+
+  geom_vline(xintercept = CS2_manoeuvres$time_med, col = "darkgreen")+
+  labs(x = "Time",
+       y = "Time series values",
+       color = "Legend") + scale_color_manual(values = colors)+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))+
+  ggtitle("SMLA anomaly detection plot: CryoSat2")
+```
+
+
+
+
+
+#HaiYang-2A
+```{r}
+h2a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Haiyang-2A.csv")
+h2a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/h2aman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(h2a_manoeuvres)<-colname
+
+```
+
+```{r}
+#change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+#transform the time variables in manoeuvres into Datetime format and delete the unsed variables
+h2a_manoeuvres<-
+h2a_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+
+```
+
+```{r}
+#change columns names
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(h2a_unpropogated)<-colname_orbit
+
+```
+
+```{r}
+h2a_manoeuvres<-h2a_manoeuvres[2:57,]#delete the manoeuvres whose time is out of the orbit recording time range
+h2a_unpropogated_ts<-ts(h2a_unpropogated)
+```
+
+```{r}
+median_date <- ts(h2a_manoeuvres)[,16]#the anomalies time
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(h2a_unpropogated_ts,0.70,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- h2a_unpropogated_ts[,c(1,index2+1)]
+group3<- h2a_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group3, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group3, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+
+```{r}
+
+plot(1:100,result1)
+```
+#Jason1
+```{r}
+ja1_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Jason-1.csv")
+ja1_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/ja1man.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(ja1_manoeuvres)<-colname
+ja1_manoeuvres<-ja1_manoeuvres[,1:26]
+head(ja1_manoeuvres)
+```
+
+```{r}
+
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    year == 2004 ~ as.Date(day-1,origin="2004-01-01"),
+    year == 2005 ~ as.Date(day-1,origin="2005-01-01"),
+    year == 2006 ~ as.Date(day-1,origin="2006-01-01"),
+    year == 2007 ~ as.Date(day-1,origin="2007-01-01"),
+    year == 2008 ~ as.Date(day-1,origin="2008-01-01"),
+    year == 2009 ~ as.Date(day-1,origin="2009-01-01"),
+    year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+ja1_manoeuvres<-
+ja1_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+```
+
+
+```{r}
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(ja1_unpropogated)<-colname_orbit
+
+head(ja1_unpropogated)
+```
+
+```{r}
+
+ja1_manoeuvres<-ja1_manoeuvres[5:118,]
+ja1_unpropogated_ts<-ts(ja1_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(ja1_manoeuvres)[,16]
+
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(ja1_unpropogated_ts,0.7,"spearman")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- ja1_unpropogated_ts[,c(1,index1+1)]
+group2<- ja1_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+#Jason2
+```{r}
+ja2_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Jason-2.csv")
+ja2_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/ja2man.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(ja2_manoeuvres)<-colname
+ja2_manoeuvres<-ja2_manoeuvres[1:109,1:26]
+
+```
+
+```{r}
+
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2008 ~ as.Date(day-1,origin="2008-01-01"),
+    year == 2009 ~ as.Date(day-1,origin="2009-01-01"),
+    year == 2010 ~ as.Date(day-1,origin="2010-01-01"),
+    year == 2011 ~ as.Date(day-1,origin="2011-01-01"),
+    year == 2012 ~ as.Date(day-1,origin="2012-01-01"),
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+ja2_manoeuvres<-
+ja2_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(ja2_unpropogated)<-colname_orbit
+```
+
+```{r}
+ja2_manoeuvres <- ja2_manoeuvres[5:109,]
+ja2_unpropogated_ts<-ts(ja2_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(ja2_manoeuvres)[,16]
+
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(ja2_unpropogated_ts,0.2,"spearman")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index4=which(cluster_s1$memberships==4)
+# split in the different group
+group1<- ja2_unpropogated_ts[,c(1,index1+1)]
+group4<- ja2_unpropogated_ts[,c(1,index4+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group4, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group4, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+
+```{r}
+
+plot(1:100,result1)
+```
+#Jason3
+```{r}
+ja3_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Jason-3.csv")
+ja3_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/ja3man.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(ja3_manoeuvres)<-colname
+ja3_manoeuvres<-ja3_manoeuvres[,1:26]
+head(ja3_manoeuvres)
+```
+
+```{r}
+
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+ja3_manoeuvres<-
+ja3_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(ja3_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(ja3_unpropogated)<-colname_orbit
+
+head(ja3_unpropogated)
+```
+
+```{r}
+ja3_manoeuvres <- ja3_manoeuvres[4:43,]
+ja3_unpropogated_ts<-ts(ja3_unpropogated)
+
+```
+
+
+```{r}
+median_date <- ts(ja3_manoeuvres)[,16]
+
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(ja3_unpropogated_ts,0.7,"spearman")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index1=which(cluster_s1$memberships==1)
+# split in the different group
+group2<- ja3_unpropogated_ts[,c(1,index2+1)]
+group1<- ja3_unpropogated_ts[,c(1,index1+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+#SARAL
+```{r}
+srl_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_SARAL.csv")
+srl_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/srlman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(srl_manoeuvres)<-colname
+srl_manoeuvres<-srl_manoeuvres[,1:26]
+head(srl_manoeuvres)
+```
+
+```{r}
+
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2013 ~ as.Date(day-1,origin="2013-01-01"),
+    year == 2014 ~ as.Date(day-1,origin="2014-01-01"),
+    year == 2015 ~ as.Date(day-1,origin="2015-01-01"),
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+srl_manoeuvres<-
+srl_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(srl_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(srl_unpropogated)<-colname_orbit
+
+head(srl_unpropogated)
+```
+
+```{r}
+srl_manoeuvres <- srl_manoeuvres[7:61,]
+srl_unpropogated_ts<-ts(srl_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(srl_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(srl_unpropogated_ts,0.7,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- srl_unpropogated_ts[,c(1,index2+1)]
+group3<- srl_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+#TOPEX
+```{r}
+top_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_TOPEX.csv")
+top_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/topman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_med","day_med","hour_med","min_med")
+colnames(top_manoeuvres)<-colname
+top_manoeuvres<-top_manoeuvres[,1:5]
+head(top_manoeuvres)
+```
+
+```{r}
+#把日期转换为“yyyy-mm-dd HH:MM:SS"格式并且讲变量以POSIXCT格式存储（R 的时间格式），标准时为”UTC“ (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute){
+  time=paste(hour,minute,sep=":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 1992 ~ as.Date(day-1,origin="1992-01-01"),
+    year == 1993 ~ as.Date(day-1,origin="1993-01-01"),
+    year == 1994 ~ as.Date(day-1,origin="1994-01-01"),
+    year == 1995 ~ as.Date(day-1,origin="1995-01-01"),
+    year == 1996 ~ as.Date(day-1,origin="1996-01-01"),
+    year == 1997 ~ as.Date(day-1,origin="1997-01-01"),
+    year == 1998 ~ as.Date(day-1,origin="1998-01-01"),
+    year == 1999 ~ as.Date(day-1,origin="1999-01-01"),
+    year == 2000 ~ as.Date(day-1,origin="2000-01-01"),
+    year == 2001 ~ as.Date(day-1,origin="2001-01-01"),
+    year == 2002 ~ as.Date(day-1,origin="2002-01-01"),
+    year == 2003 ~ as.Date(day-1,origin="2003-01-01"),
+    year == 2004 ~ as.Date(day-1,origin="2004-01-01")
+  )
+  datetime=paste(date,time)
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+top_manoeuvres<-
+top_manoeuvres|>
+  mutate(
+    time_med=DATETIME(year_med,day_med,hour_med,min_med),
+    .keep="unused"
+  )
+
+head(top_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(top_unpropogated)<-colname_orbit
+
+head(top_unpropogated)
+```
+
+```{r}
+top_manoeuvres <- top_manoeuvres[3:19,]
+top_unpropogated_ts<-ts(top_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(top_manoeuvres)[,2]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(top_unpropogated_ts,0.7,"pearson")
+cluster_s1
+```
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- top_unpropogated_ts[,c(1,index2+1)]
+group3<- top_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+#s3a
+```{r}
+s3a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Sentinel-3A.csv")
+s3a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/s3aman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(s3a_manoeuvres)<-colname
+s3a_manoeuvres<-s3a_manoeuvres[,1:26]
+head(s3a_manoeuvres)
+```
+
+```{r}
+# (change the datetime format into yyyy-mm-dd HH:MM:SS and save as POSIXCT, TZ=UTC)
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2016 ~ as.Date(day-1,origin="2016-01-01"),
+    year == 2017 ~ as.Date(day-1,origin="2017-01-01"),
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+s3a_manoeuvres<-
+s3a_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(s3a_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(s3a_unpropogated)<-colname_orbit
+
+head(s3a_unpropogated)
+```
+
+```{r}
+s3a_manoeuvres <- s3a_manoeuvres[6:63,]
+s3a_unpropogated_ts<-ts(s3a_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(s3a_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(s3a_unpropogated_ts,0.7,"spearman")
+cluster_s1
+```
+
+
+
+```{r}
+# get the columns indeice for each group
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group2<- s3a_unpropogated_ts[,c(1,index2+1)]
+group3<- s3a_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group3, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group3, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+Anomaly inference example
+```{r}
+window_index=sort(as.data.frame(which(cluster_w[]!=rep(1,ncol(cluster_w)),arr.ind=TRUE))$row)
+anomaly_index = unique(window_index)
+
+anomaly_index
+```
+
+```{r}
+#took the abnormal time window manually
+w1 <- s3a_unpropogated[1:10,]
+w2 <- s3a_unpropogated[11:20,]
+w3 <- s3a_unpropogated[21:30,]
+w4 <- s3a_unpropogated[31:40,]
+w5 <- s3a_unpropogated[41:50,]
+w7 <- s3a_unpropogated[61:70,]
+w8 <- s3a_unpropogated[71:80,]
+w9 <- s3a_unpropogated[81:90,]
+w10 <- s3a_unpropogated[91:100,]
+w11 <- s3a_unpropogated[101:110,]
+w12 <- s3a_unpropogated[111:120,]
+w13 <- s3a_unpropogated[121:130,]
+w14 <- s3a_unpropogated[131:140,]
+w15 <- s3a_unpropogated[141:150,]
+w17 <- s3a_unpropogated[161:170,]
+w18 <- s3a_unpropogated[171:180,]
+w19 <- s3a_unpropogated[181:190,]
+w20 <- s3a_unpropogated[191:200,]
+w22 <- s3a_unpropogated[211:220,]
+w23 <- s3a_unpropogated[221:230,]
+w25 <- s3a_unpropogated[241:250,]
+
+temp<-data.frame(
+  start=c(w1[1,1]$time,w2[1,1]$time,w5[1,1]$time,w7[1,1]$time,w8[1,1]$time,w9[1,1]$time,w10[1,1]$time,w11[1,1]$time,w12[1,1]$time,w13[1,1]$time,w14[1,1]$time,w25[1,1]$time),
+  end =c(w1[10,1]$time,w2[10,1]$time,w5[10,1]$time,w7[10,1]$time,w8[10,1]$time,w9[10,1]$time,w10[10,1]$time,w11[10,1]$time,w12[10,1]$time,w13[10,1]$time,w14[10,1]$time,w25[10,1]$time)
+)
+dateRanges <- data.frame(
+  start = as.POSIXct(temp [,1], TZ = "UTC"),
+  end   = as.POSIXct(temp [,2], TZ = "UTC"))
+```
+
+
+```{r}
+
+colors <- c("inclination" = "darkorange","brouwer_mean_motion+1.659"="deepskyblue2")
+ggplot(s3a_unpropogated[1:250,]) + 
+  geom_rect(data = dateRanges, aes(xmin = start , xmax = end, ymin = -Inf, ymax = Inf),
+            inherit.aes=FALSE, alpha = 0.4, fill = c("lightblue"))+
+  geom_line(aes(x=time, y=inclination ,color="inclination"), size = 1,)+
+  geom_line(aes(x=time,y=brouwer_mean_motion+1.659,color="brouwer_mean_motion+1.659"),size=1)+
+  geom_vline(xintercept = s3a_manoeuvres$time_med[1:10], col = "darkgreen")+
+  labs(x = "Time",
+       y = "Time series values",
+       color = "Legend") + scale_color_manual(values = colors)+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))+
+  ggtitle("SMLA anomaly detection plot: Sentinel-3A")
+
+```
+
+
+#s3b
+```{r}
+s3b_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Sentinel-3B.csv")
+s3b_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/s3bman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(s3b_manoeuvres)<-colname
+s3b_manoeuvres<-s3b_manoeuvres[,1:26]
+head(s3b_manoeuvres)
+```
+
+```{r}
+
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2018 ~ as.Date(day-1,origin="2018-01-01"),
+    year == 2019 ~ as.Date(day-1,origin="2019-01-01"),
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+s3b_manoeuvres<-
+s3b_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(s3b_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(s3b_unpropogated)<-colname_orbit
+
+head(s3b_unpropogated)
+```
+
+```{r}
+s3b_manoeuvres <- s3b_manoeuvres[6:55,]
+s3b_unpropogated_ts<-ts(s3b_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(s3b_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(s3b_unpropogated_ts,0.7,"spearman")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+index3=which(cluster_s1$memberships==3)
+# split in the different group
+group1<- s3b_unpropogated_ts[,c(1,index1+1)]
+group2<- s3b_unpropogated_ts[,c(1,index2+1)]
+group3<- s3b_unpropogated_ts[,c(1,index3+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group3, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimal threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group3, (index-1)/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+
+```{r}
+
+plot(1:100,result1)
+```
+
+anomaly inference example
+```{r}
+
+window_index=sort(as.data.frame(which(cluster_w[]!=rep(1,ncol(cluster_w)),arr.ind=TRUE))$row)
+anomaly_index = unique(window_index)
+
+anomaly_index
+
+```
+
+```{r}
+#take the abnormal time window manually
+w1 <- s3b_unpropogated[1:10,]
+w2 <- s3b_unpropogated[11:20,]
+w3 <- s3b_unpropogated[21:30,]
+w4 <- s3b_unpropogated[31:40,]
+w5 <- s3b_unpropogated[41:50,]
+w9 <- s3b_unpropogated[81:90,]
+w10 <- s3b_unpropogated[91:100,]
+w11 <- s3b_unpropogated[101:110,]
+w18 <- s3b_unpropogated[171:180,]
+w20 <- s3b_unpropogated[191:200,]
+
+temp<-data.frame(
+  start=c(w1[1,1]$time,w2[1,1]$time,w3[1,1]$time,w4[1,1]$time,w5[1,1]$time,w9[1,1]$time,w10[1,1]$time,w11[1,1]$time,w18[1,1]$time,w20[1,1]$time),
+  end =c(w1[10,1]$time,w2[10,1]$time,w3[10,1]$time,w4[10,1]$time,w5[10,1]$time,w9[10,1]$time,w10[10,1]$time,w11[10,1]$time,w18[10,1]$time,w20[10,1]$time)
+)
+dateRanges <- data.frame(
+  start = as.POSIXct(temp [,1], TZ="UTC"),
+  end   = as.POSIXct(temp [,2], TZ="UTC"))
+```
+
+```{r}
+
+colors <- c("bmm+1.66" = "black","inc"="red")
+ggplot(s3b_unpropogated[1:244,]) + 
+  geom_rect(data = dateRanges, aes(xmin = start , xmax = end, ymin = -Inf, ymax = Inf),
+            inherit.aes=FALSE, alpha = 0.4, fill ='#ad53b0')+
+  geom_line(aes(x=  time, y =brouwer_mean_motion+1.66 ,color="bmm+1.66"), size = 1,)+
+  geom_line(aes(x=time,y=inclination,color="inc"),size=1)+
+  geom_vline(xintercept = s3b_manoeuvres$time_med, col = "darkgreen",size=0.7)+
+  labs(x = "Time",
+       y = "Time series values",
+       color = "Legend") + scale_color_manual(values = colors)+
+  ggtitle("SMLA anomaly detection plot: Sentinel-3B")+
+  scale_x_datetime(labels = date_format("%Y-%m-%d"))
+```
+
+
+
+#s6a
+```{r}
+s6a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_Sentinel-6A.csv")
+s6a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/s6aman.txt",col_names = FALSE)
+```
+
+```{r}
+colname<-c("sate_id","year_begin","day_begin","hour_begin","min_begin","year_end","day_end","hour_end","min_end","type_para","burns","year_med","day_med","hour_med","min_med","second_med","boost_duration","DV1","DV2","DV3","acc1","acc2","acc3","dacc1","dacc2","dacc3")
+colnames(s6a_manoeuvres)<-colname
+s6a_manoeuvres<-s6a_manoeuvres[,1:26]
+head(s6a_manoeuvres)
+```
+
+```{r}
+
+DATETIME<-function(year,day,hour,minute,second){
+  if (length(second)==0)
+    second="00"
+  time=paste(hour,minute,sep = ":")
+  time=paste(time,second,sep = ":")
+  day=as.numeric(day)
+  date=case_when(
+    year == 2020 ~ as.Date(day-1,origin="2020-01-01"),
+    year == 2021 ~ as.Date(day-1,origin="2021-01-01"),
+    year == 2022 ~ as.Date(day-1,origin="2022-01-01")
+  )
+  datetime=paste(date,time,sep = " ")
+  datetime=as.POSIXct(datetime,TZ="UTC")
+  return(datetime)
+}
+```
+
+```{r}
+
+s6a_manoeuvres<-
+s6a_manoeuvres|>
+  mutate(
+    time_begin=DATETIME(year_begin,day_begin,hour_begin,min_begin,second = c()),
+    time_end=DATETIME(year_end,day_end,hour_end,min_end,second = c()),
+    time_med=DATETIME(year_med,day_med,hour_med,min_med,second_med),
+    .keep="unused"
+  )
+
+head(s6a_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(s6a_unpropogated)<-colname_orbit
+
+head(s6a_unpropogated)
+```
+
+```{r}
+s6a_manoeuvres <- s6a_manoeuvres[5:17,]
+s6a_unpropogated_ts<-ts(s6a_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(s6a_manoeuvres)[,16]
+median_date
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(s6a_unpropogated_ts,0.7,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- s6a_unpropogated_ts[,c(1,index1+1)]
+group2<- s6a_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group1, i/100, 5,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group1, (index-1)/100, 5,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+#FY2D
+```{r}
+fy2d_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2D.csv")
+fy2d_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2D.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2d_manoeuvres)<-colname
+fy2d_manoeuvres<-fy2d_manoeuvres
+
+```
+
+
+```{r}
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2d_unpropogated)<-colname_orbit
+fy2d_unpropogated<-fy2d_unpropogated[5:nrow(fy2d_unpropogated),]
+
+```
+
+```{r}
+
+fy2d_unpropogated_ts<-ts(fy2d_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2d_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2d_unpropogated_ts,0.5,"spearman")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index3=which(cluster_s1$memberships==3)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group3<- fy2d_unpropogated_ts[,c(1,index3+1)]
+group2<- fy2d_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group3, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group3, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+
+
+#FY2E
+```{r}
+fy2e_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2E.csv")
+fy2e_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2E.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2e_manoeuvres)<-colname
+fy2e_manoeuvres<-fy2e_manoeuvres
+head(fy2e_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2e_unpropogated)<-colname_orbit
+fy2e_unpropogated<-fy2e_unpropogated[5:nrow(fy2e_unpropogated),]
+head(fy2e_unpropogated)
+```
+
+```{r}
+fy2e_unpropogated_ts<-ts(fy2e_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2e_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2e_unpropogated_ts,0.5,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- fy2e_unpropogated_ts[,c(1,index1+1)]
+group2<- fy2e_unpropogated_ts[,c(1,index2+1)]
+```
+
+
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group1, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group1, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+
+#FY2F
+```{r}
+fy2f_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2F.csv")
+fy2f_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2F.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2f_manoeuvres)<-colname
+fy2f_manoeuvres<-fy2f_manoeuvres
+
+```
+
+
+```{r}
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2f_unpropogated)<-colname_orbit
+fy2f_unpropogated<-fy2f_unpropogated[5:nrow(fy2f_unpropogated),]
+head(fy2f_unpropogated)
+```
+
+```{r}
+fy2f_unpropogated_ts<-ts(fy2f_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2f_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2f_unpropogated_ts,0.4,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index1=which(cluster_s1$memberships==1)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group1<- fy2f_unpropogated_ts[,c(1,index1+1)]
+group2<- fy2f_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"spearman")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+
+#FY2H
+```{r}
+fy2h_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-2H.csv")
+fy2h_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY2H.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy2h_manoeuvres)<-colname
+fy2h_manoeuvres<-fy2h_manoeuvres
+head(fy2h_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy2h_unpropogated)<-colname_orbit
+fy2h_unpropogated<-fy2h_unpropogated[5:nrow(fy2h_unpropogated),]
+
+```
+
+```{r}
+fy2h_unpropogated_ts<-ts(fy2h_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy2h_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy2h_unpropogated_ts,0.7,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index3=which(cluster_s1$memberships==3)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group3<- fy2h_unpropogated_ts[,c(1,index3+1)]
+group2<- fy2h_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
+
+
+
+
+#FY4A
+```{r}
+fy4a_unpropogated<-read_csv("C:/Users/11961/Desktop/study/satellite_data/orbital_elements/unpropagated_elements_FengYun-4A.csv")
+fy4a_manoeuvres<-read_table("C:/Users/11961/Desktop/study/satellite_data/manoeuvres/manFY4A.txt.fy",col_names = FALSE)
+```
+
+```{r}
+colname<-c("unknow1","unknow2","time_begin","time_end")
+colnames(fy4a_manoeuvres)<-colname
+fy4a_manoeuvres<-fy4a_manoeuvres
+head(fy4a_manoeuvres)
+```
+
+
+```{r}
+
+colname_orbit<-c("time","eccentricity","argument_of_perigee","inclination","mean_anomaly","brouwer_mean_motion","right_ascension")
+
+colnames(fy4a_unpropogated)<-colname_orbit
+fy4a_unpropogated<-fy4a_unpropogated[5:nrow(fy4a_unpropogated),]
+head(fy4a_unpropogated)
+```
+
+```{r}
+fy4a_unpropogated_ts<-ts(fy4a_unpropogated)
+
+```
+
+```{r}
+median_date <- ts(fy4a_manoeuvres)[,3]
+median_date<-sort(median_date)
+```
+
+
+```{r}
+
+cluster_s1<-SMLA_s1(fy4a_unpropogated_ts,0.3,"pearson")
+cluster_s1
+```
+
+
+```{r}
+# get the columns indeice for each group
+index3=which(cluster_s1$memberships==3)
+index2=which(cluster_s1$memberships==2)
+# split in the different group
+group3<- fy4a_unpropogated_ts[,c(1,index3+1)]
+group2<- fy4a_unpropogated_ts[,c(1,index2+1)]
+```
+
+```{r}
+result1<-list()
+for (i in 0:99){
+  a<-SMLA_s2(group2, i/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
+}
+
+```
+```{r}
+index<-which.max(unlist(result1))
+print("The value of optimul threshold2 is")
+print((index-1)/100)
+a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
+cluster_w=a[[1]]
+windows_norepeat=a[[2]]
+model_eval(windows_norepeat,cluster_w,median_date)
+```
+
+```{r}
+
+plot(1:100,result1)
+```
