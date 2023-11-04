@@ -132,7 +132,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 get the optimal model with current parameters
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group1, (index-1)/100, 10,"spearman")
 cluster_w=a[[1]]
@@ -317,7 +317,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group3, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -436,7 +436,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -552,7 +552,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group4, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -666,7 +666,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -781,7 +781,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -896,7 +896,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"spearman")
 cluster_w=a[[1]]
@@ -1013,7 +1013,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group3, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -1347,7 +1347,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group1, (index-1)/100, 5,"pearson")
 cluster_w=a[[1]]
@@ -1423,7 +1423,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group3, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -1503,7 +1503,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group1, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -1580,7 +1580,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"spearman")
 cluster_w=a[[1]]
@@ -1659,7 +1659,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
@@ -1737,7 +1737,7 @@ result1[i+1]<-model_eval(windows_norepeat,cluster_w,median_date)[1]
 ```
 ```{r}
 index<-which.max(unlist(result1))
-print("The value of optimul threshold2 is")
+print("The value of optimal threshold2 is")
 print((index-1)/100)
 a<-SMLA_s2(group2, (index-1)/100, 10,"pearson")
 cluster_w=a[[1]]
